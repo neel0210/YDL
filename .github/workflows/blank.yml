@@ -1,0 +1,60 @@
+name: YDL
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'YouTube Link'
+        required: true
+        type: string
+
+jobs:
+  download-and-send:
+    runs-on: ubuntu-latest
+    env:
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo chmod a+rx /usr/local/bin/yt-dlp
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Download Audio
+        id: download_step
+        run: |
+          yt-dlp -x --audio-format mp3 --audio-quality 0 \
+            --embed-metadata --embed-thumbnail \
+            --max-filesize 50M \
+            -o "%(title)s.%(ext)s" \
+            "${{ github.event.inputs.url }}"
+
+      - name: Upload Audio Files
+        if: success()
+        run: |
+          for file in *.mp3; do
+            echo "Uploading: $file"
+            curl -F chat_id="$CHAT_ID" \
+                 -F audio="@$file" \
+                 "https://api.telegram.org/bot$BOT_TOKEN/sendAudio"
+            sleep 2
+          done
+
+      - name: Notify Success
+        if: success()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+            -d chat_id="$CHAT_ID" \
+            -d text="✅ Successfully downloaded and sent all files from: ${{ github.event.inputs.url }}"
+
+      - name: Notify Failure
+        if: failure()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+            -d chat_id="$CHAT_ID" \
+            -d text="❌ Failed to download or send audio. Check GitHub Actions logs for details."
